@@ -1,0 +1,110 @@
+package com.sliit.synchronizertokenpattern.service.impl;
+
+import java.security.NoSuchAlgorithmException;
+import java.util.UUID;
+
+import javax.servlet.http.Cookie;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.sliit.synchronizertokenpattern.model.ServerStore;
+import com.sliit.synchronizertokenpattern.model.User;
+import com.sliit.synchronizertokenpattern.service.AuthenticationService;
+import com.sliit.synchronizertokenpattern.util.CredentialConfiguration;
+import com.sliit.synchronizertokenpattern.util.HashingConfiguration;
+
+@Service
+public class AuthenticationServiceImpl implements AuthenticationService {
+
+	@Autowired
+	CredentialConfiguration credentialConfiguration;
+
+	@Autowired
+	HashingConfiguration hashingConfiguration;
+	
+	ServerStore serverStore = new ServerStore();
+	private static Logger logger = LoggerFactory.getLogger(AuthenticationServiceImpl.class);
+
+	@Override
+	public boolean isValidUser(String username, String password) throws NoSuchAlgorithmException {
+		logger.info("User Authenticating...");
+		return (username.equals(credentialConfiguration.getAuthUser())
+				&& hashingConfiguration.convertToHash(password).equals(credentialConfiguration.getPassword()));
+
+	}
+
+	@Override
+	public boolean isUserAuthenticated(Cookie[] cookies) {
+		String username = "";
+		String sessionID = "";
+
+		if (cookies != null && cookies.length > 0) {
+			for (Cookie cookie : cookies) {
+				if (cookie.getName().equals("sessionID")) {
+					sessionID = cookie.getValue();
+				} else if (cookie.getName().equals("username")) {
+					username = cookie.getValue();
+				}
+			}
+		}
+		return isUserSessionValid(username, sessionID);
+	}
+
+	@Override
+	public boolean isUserSessionValid(String username, String sessionId) {
+		logger.debug("Checking if user session is valid... " + username + ", " + sessionId);
+		if (serverStore.findCredentials(username) != null) {
+			return sessionId.equals(serverStore.findCredentials(username).getSessionId());
+		}
+		return false;
+	}
+
+	@Override
+	public String generateSessionId() {
+		return UUID.randomUUID().toString();
+	}
+
+	@Override
+	public String generateCSRFToken(String sessionId) {
+		return sessionId + System.currentTimeMillis();
+	}
+
+	@Override
+	public String generateCredentialsToUser(String username) {
+		User user = serverStore.findCredentials(username);
+		String sessionId = generateSessionId();
+
+		user.setSessionId(sessionId);
+		user.setToken(generateCSRFToken(sessionId));
+		serverStore.storeUsersAndTokens(user);
+
+		logger.info("Storing session...");
+		return sessionId;
+	}
+
+	@Override
+	public String getSessionIdFromCookie(Cookie[] cookies) {
+		if (cookies != null && cookies.length > 0) {
+			for (Cookie cookie : cookies) {
+				if (cookie.getName().equals("sessionID")) {
+					return cookie.getValue();
+				}
+			}
+		}
+		return null;
+	}
+
+	@Override
+	public boolean isCSRFTokenValid(String sessionId, String csrfToken) {
+		if (csrfToken != null) {
+			logger.debug("is equal ? " + csrfToken.equals(serverStore.retrieveCSRFToken(sessionId)));
+			return csrfToken.equals(serverStore.retrieveCSRFToken(sessionId));
+		}
+		return false;
+
+	}
+
+}
